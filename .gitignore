@@ -1,0 +1,20 @@
+# Môi trường ảo Python
+venv/
+env/
+.env
+
+# Cache của Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# File âm thanh rác (Sinh ra liên tục khi người dùng thu âm và AI đọc mẫu)
+temp*.wav
+tts_cache_*.mp3
+
+# Thư mục cấu hình local của Streamlit (nếu có)
+.streamlit/
+
+# File rác của hệ điều hành
+.DS_Store
+Thumbs.db

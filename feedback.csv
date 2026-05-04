@@ -1,0 +1,8 @@
+error_code,message
+tone_1,Thanh 1 (Ngang): Bạn cần giữ giọng cao và đều, không lên xuống.
+tone_2,Thanh 2 (Sắc): Đọc từ thấp lên cao giống dấu sắc tiếng Việt, nhưng kéo dài hơn.
+tone_3,Thanh 3 (Hỏi): Ép giọng xuống thấp rồi vòng lên (giống hình chữ V).
+tone_4,Thanh 4 (Nặng): Phải đọc dứt khoát, rơi mạnh từ trên cao xuống.
+wrong_pinyin,Bạn phát âm sai vần hoặc phụ âm chữ này. Hãy nghe lại mẫu và nhép miệng theo.
+english_wrong,Chú ý nhấn trọng âm và các âm đuôi (ending sounds) nhé!
+missing,Bạn đọc lướt quá nhanh nên bị mất từ này, chậm lại một chút nhé.

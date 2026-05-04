@@ -1,0 +1,10 @@
+streamlit
+streamlit-mic-recorder
+openai-whisper
+pypinyin
+gTTS
+hanziconv
+deep-translator
+pandas
+openpyxl
+edge-tts
