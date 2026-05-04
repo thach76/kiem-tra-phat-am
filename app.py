@@ -16,17 +16,28 @@ import asyncio
 
 st.set_page_config(page_title="Hệ Thống Kiểm Tra Phát Âm", layout="wide")
 
+# --- 0. QUẢN LÝ THƯ MỤC & DỌN RÁC (GARBAGE COLLECTION) ---
+TTS_DIR = "tts_cache"
+os.makedirs(TTS_DIR, exist_ok=True)
+os.makedirs("sounds", exist_ok=True) # Đảm bảo thư mục sounds luôn tồn tại
+
+# Chỉ dọn rác 1 lần duy nhất mỗi khi mở app (phiên làm việc mới)
+if 'cleanup_done' not in st.session_state:
+    for filename in os.listdir(TTS_DIR):
+        filepath = os.path.join(TTS_DIR, filename)
+        try:
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+        except Exception:
+            pass
+    st.session_state.cleanup_done = True
+
 # --- 1. KHỞI TẠO BỘ NHỚ ---
-if 'processed_audio_id' not in st.session_state:
-    st.session_state.processed_audio_id = None
-if 'dictated_audio_id' not in st.session_state:
-    st.session_state.dictated_audio_id = None
-if 'target_text_memory' not in st.session_state:
-    st.session_state.target_text_memory = ""
-if 'analysis_result' not in st.session_state:
-    st.session_state.analysis_result = None
-if 'dictated_text' not in st.session_state:
-    st.session_state.dictated_text = ""
+if 'processed_audio_id' not in st.session_state: st.session_state.processed_audio_id = None
+if 'dictated_audio_id' not in st.session_state: st.session_state.dictated_audio_id = None
+if 'target_text_memory' not in st.session_state: st.session_state.target_text_memory = ""
+if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
+if 'dictated_text' not in st.session_state: st.session_state.dictated_text = ""
 
 # --- 2. HỆ THỐNG TẢI DỮ LIỆU ---
 @st.cache_resource
@@ -41,8 +52,7 @@ def load_csv_data(filepath):
             reader = csv.DictReader(f)
             if reader.fieldnames:
                 key_col = reader.fieldnames[0]
-                for row in reader:
-                    data_dict[row[key_col]] = row
+                for row in reader: data_dict[row[key_col]] = row
     return data_dict
 
 model = load_model()
@@ -57,20 +67,17 @@ def play_sound_effect_hidden(score):
             b64 = base64.b64encode(f.read()).decode()
             st.markdown(f'<audio autoplay="true" style="display:none;"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>', unsafe_allow_html=True)
 
-# Hàm hỗ trợ tạo file âm thanh AI bằng Edge TTS
 async def _generate_tts(text, voice, rate, filepath):
     communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(filepath)
 
 def create_ai_voice(text, voice, rate="+0%"):
-    # Tạo tên file độc nhất để không bị đè nhau
     file_hash = hash(text + voice + rate)
-    filepath = f"tts_cache_{abs(file_hash)}.mp3"
+    # Lưu vào thư mục tts_cache thay vì thư mục gốc
+    filepath = os.path.join(TTS_DIR, f"tts_{abs(file_hash)}.mp3")
     
     if not os.path.exists(filepath):
-        # Chạy logic bất đồng bộ của edge-tts
-        try:
-            loop = asyncio.get_event_loop()
+        try: loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -139,13 +146,11 @@ def analyze_pronunciation(target, user, lang):
 # --- 5. GIAO DIỆN & LOGIC ĐIỀU HƯỚNG ---
 st.title("🎙️ Hệ Thống Kiểm Tra Phát Âm PRO")
 
-# Sidebar: Quản lý thiết lập
 with st.sidebar:
     st.header("⚙️ Thiết lập hệ thống")
     app_mode = st.selectbox("Chế độ hoạt động:", ["Luyện tập tự do", "Làm bài kiểm tra (Excel)"])
     lang_choice = st.radio("Ngôn ngữ:", ("Tiếng Trung", "Tiếng Anh"))
     
-    # Thiết lập loại chữ & giọng đọc theo ngôn ngữ
     char_type = "Giản thể"
     if lang_choice == "Tiếng Trung":
         char_type = st.radio("Loại chữ:", ("Giản thể", "Phồn thể"))
@@ -212,8 +217,6 @@ if target_text != st.session_state.target_text_memory:
 
 if target_text:
     st.write("---")
-    
-    # Khu vực phát âm thanh mẫu (Nhanh & Chậm)
     st.write("🔊 **Nghe AI đọc mẫu:**")
     col_play_normal, col_play_slow, col_empty = st.columns([1, 1, 2])
     with col_play_normal:
@@ -222,7 +225,6 @@ if target_text:
         st.audio(normal_audio, format='audio/mp3')
     with col_play_slow:
         st.caption("🐢 Tốc độ chậm (Từng từ)")
-        # Giảm tốc độ xuống 40% để người dùng nghe rõ từng phát âm
         slow_audio = create_ai_voice(target_text, voice_code, rate="-40%")
         st.audio(slow_audio, format='audio/mp3')
 
@@ -287,4 +289,3 @@ if st.session_state.analysis_result:
             st.write("💡 **Gợi ý sửa lỗi:**")
             for err in res['errors']:
                 if err in feedbacks: st.warning(feedbacks[err].get('message', ''))
-                
