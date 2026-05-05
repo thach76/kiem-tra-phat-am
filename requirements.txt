@@ -8,3 +8,4 @@ deep-translator
 pandas
 openpyxl
 edge-tts
+pykakasi

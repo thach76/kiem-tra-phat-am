@@ -13,6 +13,7 @@ import csv
 import base64
 import edge_tts
 import asyncio
+import pykakasi # Thư viện mới cho Tiếng Nhật
 
 st.set_page_config(page_title="Pronunciation PRO", layout="wide")
 
@@ -21,10 +22,10 @@ NATIVE_LANG_MAP = {
     "Tiếng Việt": "vi",
     "English": "en",
     "한국어 (Tiếng Hàn)": "ko",
+    "日本語 (Tiếng Nhật)": "ja",
     "中文 (Tiếng Trung)": "zh-CN"
 }
 
-# Lấy Native Code ĐẦU TIÊN để dùng cho toàn bộ app
 with st.sidebar:
     native_lang_choice = st.selectbox("🌍 Native Language / Ngôn ngữ mẹ đẻ:", list(NATIVE_LANG_MAP.keys()))
     native_code = NATIVE_LANG_MAP[native_lang_choice]
@@ -61,6 +62,10 @@ def _t(text, target_lang_code):
 def load_model():
     return whisper.load_model("base")
 
+@st.cache_resource
+def load_kakasi():
+    return pykakasi.kakasi()
+
 @st.cache_data
 def load_csv_data(filepath):
     data_dict = {}
@@ -72,9 +77,9 @@ def load_csv_data(filepath):
                 for row in reader: data_dict[row[key_col]] = row
     return data_dict
 
-# 🚀 THÊM PHẦN LOAD: Hiển thị thanh loading khi tải mô hình AI lần đầu
 with st.spinner(_t("⚙️ Đang khởi tạo hệ thống AI...", native_code)):
     model = load_model()
+    kks = load_kakasi()
     feedbacks = load_csv_data("feedback.csv")
     vocab_dict = load_csv_data("vocab.csv")
 
@@ -140,6 +145,35 @@ def analyze_pronunciation(target, user, lang, native_code):
                 color, label = "#dc3545", _t("Sai âm", native_code)
                 errors_found.add("wrong_pinyin")
             html_output.append(f"<div style='display:inline-block; text-align:center; margin:10px;'><div style='font-size:30px; color:{color}; font-weight:bold;'>{char}</div><div style='font-size:14px; color:gray;'>{t_pinyin}{t_tone}</div><div style='font-size:12px; background-color:{color}; color:white; border-radius:5px; padding:2px 5px;'>{label}</div></div>")
+    
+    elif lang == "Tiếng Nhật":
+        # Dùng pykakasi để tách từ tiếng Nhật và lấy Romaji
+        target_chunks = kks.convert(target)
+        user_chunks = kks.convert(user)
+        total_count = len(target_chunks)
+        
+        for i in range(total_count):
+            t_orig = target_chunks[i]['orig']
+            t_romaji = target_chunks[i]['hepburn']
+            
+            if i >= len(user_chunks):
+                html_output.append(f"<div style='display:inline-block; text-align:center; margin:10px;'><div style='font-size:24px; color:gray; text-decoration: line-through;'>{t_orig}</div><div style='font-size:12px; background-color:gray; color:white; border-radius:5px; padding:2px 5px;'>{_t('Thiếu', native_code)}</div></div>")
+                errors_found.add("missing")
+                continue
+                
+            u_orig = user_chunks[i]['orig']
+            u_romaji = user_chunks[i]['hepburn']
+            
+            # So sánh bằng Romaji hoặc Kanji gốc
+            if t_romaji == u_romaji or t_orig == u_orig:
+                color, label = "#28a745", _t("Đúng", native_code)
+                correct_count += 1
+            else:
+                color, label = "#dc3545", f"{_t('Nghe ra', native_code)}: {u_orig}"
+                errors_found.add("japanese_wrong")
+                
+            html_output.append(f"<div style='display:inline-block; text-align:center; margin:10px;'><div style='font-size:24px; color:{color}; font-weight:bold;'>{t_orig}</div><div style='font-size:14px; color:gray;'>{t_romaji}</div><div style='font-size:12px; background-color:{color}; color:white; border-radius:5px; padding:2px 5px;'>{label}</div></div>")
+
     else:
         target_words, user_words = clean_spaced_text(target), clean_spaced_text(user)
         total_count = len(target_words)
@@ -167,26 +201,25 @@ st.title(_t("🎙️ Hệ Thống Kiểm Tra Phát Âm PRO", native_code))
 with st.sidebar:
     st.header(_t("⚙️ Thiết lập hệ thống", native_code))
     
-    # 🚀 DỊCH LỰA CHỌN: CHẾ ĐỘ
     app_mode_base = ["Luyện tập tự do", "Làm bài kiểm tra (Excel)"]
     app_mode_trans = [_t(x, native_code) for x in app_mode_base]
     app_mode_selected = st.selectbox(_t("Chế độ hoạt động:", native_code), app_mode_trans)
-    app_mode = app_mode_base[app_mode_trans.index(app_mode_selected)] # Ánh xạ ngược lại logic chuẩn
+    app_mode = app_mode_base[app_mode_trans.index(app_mode_selected)]
 
-    # 🚀 DỊCH LỰA CHỌN: NGÔN NGỮ
-    lang_base = ["Tiếng Trung", "Tiếng Anh", "Tiếng Hàn", "Tiếng Việt"]
+    # THÊM TIẾNG NHẬT VÀO DANH SÁCH
+    lang_base = ["Tiếng Trung", "Tiếng Anh", "Tiếng Nhật", "Tiếng Hàn", "Tiếng Việt"]
     lang_trans = [_t(x, native_code) for x in lang_base]
     lang_selected = st.radio(_t("Ngôn ngữ cần học:", native_code), lang_trans)
-    lang_choice = lang_base[lang_trans.index(lang_selected)] # Ánh xạ ngược lại logic chuẩn
+    lang_choice = lang_base[lang_trans.index(lang_selected)]
     
     if lang_choice != st.session_state.prev_lang:
         st.session_state.dictated_text = ""
         st.session_state.analysis_result = None
         st.session_state.prev_lang = lang_choice
 
-    # Cấu hình AI Voice & Whisper theo ngôn ngữ
+    char_type = "Giản thể"
+    
     if lang_choice == "Tiếng Trung":
-        # Dịch Loại chữ
         char_base = ["Giản thể", "Phồn thể"]
         char_trans = [_t(x, native_code) for x in char_base]
         char_selected = st.radio(_t("Loại chữ:", native_code), char_trans)
@@ -199,6 +232,10 @@ with st.sidebar:
         voice_choice = st.selectbox(_t("Giọng AI bản xứ:", native_code), ["👩 Aria", "👦 Guy"])
         voice_code = "en-US-AriaNeural" if "Nữ" in voice_choice or "Aria" in voice_choice else "en-US-GuyNeural"
         whisper_lang = "en"
+    elif lang_choice == "Tiếng Nhật":
+        voice_choice = st.selectbox(_t("Giọng AI bản xứ:", native_code), ["👩 Nanami", "👦 Keita"])
+        voice_code = "ja-JP-NanamiNeural" if "Nữ" in voice_choice or "Nanami" in voice_choice else "ja-JP-KeitaNeural"
+        whisper_lang = "ja"
     elif lang_choice == "Tiếng Hàn":
         voice_choice = st.selectbox(_t("Giọng AI bản xứ:", native_code), ["👩 SunHi", "👦 InJoon"])
         voice_code = "ko-KR-SunHiNeural" if "Nữ" in voice_choice or "SunHi" in voice_choice else "ko-KR-InJoonNeural"
@@ -212,6 +249,7 @@ target_text = ""
 default_sentences = {
     "Tiếng Trung": "你好",
     "Tiếng Anh": "I should study every day",
+    "Tiếng Nhật": "こんにちは、お元気ですか",
     "Tiếng Hàn": "안녕하세요",
     "Tiếng Việt": "Xin chào, bạn khỏe không"
 }
@@ -342,6 +380,15 @@ if st.session_state.analysis_result:
                 if search_char in vocab_dict:
                     v_info = vocab_dict[search_char]
                     st.write(f"- **{char}** ({_t('Hán Việt', native_code)}: *{v_info.get('hanviet', '')}*): {v_info.get('meaning', '')}")
+                    
+        elif lang_choice == "Tiếng Nhật":
+            st.write(f"🔍 **{_t('Phân tích Kanji / Romaji:', native_code)}**")
+            for chunk in kks.convert(target_text):
+                # Chỉ hiển thị nếu nó có chứa Kanji hoặc khác với Kana/Hiragana gốc
+                if chunk['orig'] != chunk['hira']:
+                    st.write(f"- **{chunk['orig']}** ({_t('Đọc là', native_code)}: *{chunk['hira']}* / Romaji: *{chunk['hepburn']}*)")
+                else:
+                    st.write(f"- **{chunk['orig']}** (Romaji: *{chunk['hepburn']}*)")
     
     with col2:
         color = "green" if res['score'] >= 80 else ("orange" if res['score'] >= 50 else "red")
