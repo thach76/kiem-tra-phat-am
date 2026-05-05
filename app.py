@@ -24,6 +24,11 @@ NATIVE_LANG_MAP = {
     "中文 (Tiếng Trung)": "zh-CN"
 }
 
+# Lấy Native Code ĐẦU TIÊN để dùng cho toàn bộ app
+with st.sidebar:
+    native_lang_choice = st.selectbox("🌍 Native Language / Ngôn ngữ mẹ đẻ:", list(NATIVE_LANG_MAP.keys()))
+    native_code = NATIVE_LANG_MAP[native_lang_choice]
+
 # --- QUẢN LÝ THƯ MỤC & DỌN RÁC ---
 TTS_DIR = "tts_cache"
 os.makedirs(TTS_DIR, exist_ok=True)
@@ -46,6 +51,12 @@ if 'dictated_text' not in st.session_state: st.session_state.dictated_text = ""
 if 'prev_lang' not in st.session_state: st.session_state.prev_lang = "Tiếng Trung"
 
 # --- 2. HỆ THỐNG TẢI DỮ LIỆU & DỊCH UI ĐỘNG ---
+@st.cache_data
+def _t(text, target_lang_code):
+    if target_lang_code == 'vi': return text
+    try: return GoogleTranslator(source='vi', target=target_lang_code).translate(text)
+    except: return text
+
 @st.cache_resource
 def load_model():
     return whisper.load_model("base")
@@ -61,18 +72,11 @@ def load_csv_data(filepath):
                 for row in reader: data_dict[row[key_col]] = row
     return data_dict
 
-# Hàm dịch UI tự động có cache (Không làm lag app)
-@st.cache_data
-def _t(text, target_lang_code):
-    if target_lang_code == 'vi': return text # Base language là tiếng Việt, không cần dịch
-    try:
-        return GoogleTranslator(source='vi', target=target_lang_code).translate(text)
-    except:
-        return text
-
-model = load_model()
-feedbacks = load_csv_data("feedback.csv")
-vocab_dict = load_csv_data("vocab.csv")
+# 🚀 THÊM PHẦN LOAD: Hiển thị thanh loading khi tải mô hình AI lần đầu
+with st.spinner(_t("⚙️ Đang khởi tạo hệ thống AI...", native_code)):
+    model = load_model()
+    feedbacks = load_csv_data("feedback.csv")
+    vocab_dict = load_csv_data("vocab.csv")
 
 # --- 3. HỆ THỐNG ÂM THANH ---
 def play_sound_effect_hidden(score):
@@ -108,14 +112,13 @@ def get_chinese_details(text):
             if p not in string.punctuation and p.strip(): parsed.append((p, "5"))
     return parsed
 
-def clean_spaced_text(text): # Dùng chung cho Anh, Hàn, Việt
+def clean_spaced_text(text):
     text = text.translate(str.maketrans('', '', string.punctuation)).lower()
     return text.split()
 
 def analyze_pronunciation(target, user, lang, native_code):
     html_output, errors_found, correct_count = [], set(), 0
     
-    # LOGIC TIẾNG TRUNG (Tách từng chữ)
     if lang == "Tiếng Trung":
         target_info, user_info = get_chinese_details(target), get_chinese_details(user)
         total_count = len(target_info)
@@ -137,8 +140,6 @@ def analyze_pronunciation(target, user, lang, native_code):
                 color, label = "#dc3545", _t("Sai âm", native_code)
                 errors_found.add("wrong_pinyin")
             html_output.append(f"<div style='display:inline-block; text-align:center; margin:10px;'><div style='font-size:30px; color:{color}; font-weight:bold;'>{char}</div><div style='font-size:14px; color:gray;'>{t_pinyin}{t_tone}</div><div style='font-size:12px; background-color:{color}; color:white; border-radius:5px; padding:2px 5px;'>{label}</div></div>")
-    
-    # LOGIC CHO CÁC NGÔN NGỮ CÓ KHOẢNG TRẮNG (Anh, Hàn, Việt)
     else:
         target_words, user_words = clean_spaced_text(target), clean_spaced_text(user)
         total_count = len(target_words)
@@ -161,29 +162,36 @@ def analyze_pronunciation(target, user, lang, native_code):
     return "".join(html_output), score, errors_found
 
 # --- 5. GIAO DIỆN & LOGIC ĐIỀU HƯỚNG ---
-# Thiết lập Native Language đầu tiên
-with st.sidebar:
-    native_lang_choice = st.selectbox("🌍 Native Language (Ngôn ngữ mẹ đẻ):", list(NATIVE_LANG_MAP.keys()))
-    native_code = NATIVE_LANG_MAP[native_lang_choice]
-
 st.title(_t("🎙️ Hệ Thống Kiểm Tra Phát Âm PRO", native_code))
 
 with st.sidebar:
     st.header(_t("⚙️ Thiết lập hệ thống", native_code))
-    app_mode = st.selectbox(_t("Chế độ hoạt động:", native_code), [_t("Luyện tập tự do", native_code), _t("Làm bài kiểm tra (Excel)", native_code)])
-    lang_choice = st.radio(_t("Ngôn ngữ cần học:", native_code), ("Tiếng Trung", "Tiếng Anh", "Tiếng Hàn", "Tiếng Việt"))
     
-    # Xóa bộ nhớ nếu người dùng đổi ngôn ngữ học
+    # 🚀 DỊCH LỰA CHỌN: CHẾ ĐỘ
+    app_mode_base = ["Luyện tập tự do", "Làm bài kiểm tra (Excel)"]
+    app_mode_trans = [_t(x, native_code) for x in app_mode_base]
+    app_mode_selected = st.selectbox(_t("Chế độ hoạt động:", native_code), app_mode_trans)
+    app_mode = app_mode_base[app_mode_trans.index(app_mode_selected)] # Ánh xạ ngược lại logic chuẩn
+
+    # 🚀 DỊCH LỰA CHỌN: NGÔN NGỮ
+    lang_base = ["Tiếng Trung", "Tiếng Anh", "Tiếng Hàn", "Tiếng Việt"]
+    lang_trans = [_t(x, native_code) for x in lang_base]
+    lang_selected = st.radio(_t("Ngôn ngữ cần học:", native_code), lang_trans)
+    lang_choice = lang_base[lang_trans.index(lang_selected)] # Ánh xạ ngược lại logic chuẩn
+    
     if lang_choice != st.session_state.prev_lang:
         st.session_state.dictated_text = ""
         st.session_state.analysis_result = None
         st.session_state.prev_lang = lang_choice
 
-    char_type = "Giản thể"
-    
     # Cấu hình AI Voice & Whisper theo ngôn ngữ
     if lang_choice == "Tiếng Trung":
-        char_type = st.radio(_t("Loại chữ:", native_code), ("Giản thể", "Phồn thể"))
+        # Dịch Loại chữ
+        char_base = ["Giản thể", "Phồn thể"]
+        char_trans = [_t(x, native_code) for x in char_base]
+        char_selected = st.radio(_t("Loại chữ:", native_code), char_trans)
+        char_type = char_base[char_trans.index(char_selected)]
+        
         voice_choice = st.selectbox(_t("Giọng AI bản xứ:", native_code), ["👩 Xiaoxiao", "👦 Yunxi"])
         voice_code = "zh-CN-XiaoxiaoNeural" if "Nữ" in voice_choice or "Xiaoxiao" in voice_choice else "zh-CN-YunxiNeural"
         whisper_lang = "zh"
@@ -201,8 +209,6 @@ with st.sidebar:
         whisper_lang = "vi"
 
 target_text = ""
-
-# Đặt câu mẫu mặc định theo ngôn ngữ
 default_sentences = {
     "Tiếng Trung": "你好",
     "Tiếng Anh": "I should study every day",
@@ -211,14 +217,14 @@ default_sentences = {
 }
 
 # --- CHẾ ĐỘ 1: LUYỆN TẬP TỰ DO ---
-if app_mode == _t("Luyện tập tự do", native_code):
+if app_mode == "Luyện tập tự do":
     st.write(f"### 📝 {_t('Nhập dữ liệu', native_code)}")
     col_text, col_mic = st.columns([4, 1])
     with col_mic:
         st.write(_t("Hoặc đọc để nhập:", native_code))
         dictate_audio = mic_recorder(start_prompt=f"🎤 {_t('Bấm nói', native_code)}", stop_prompt=f"⏹ {_t('Dừng', native_code)}", key='dictate_recorder')
         if dictate_audio and dictate_audio['id'] != st.session_state.dictated_audio_id:
-            with st.spinner(_t("Đang chuyển giọng...", native_code)):
+            with st.spinner(_t("Đang chuyển giọng thành chữ...", native_code)):
                 temp_dict_file = f"temp_dict_{int(time.time())}.wav"
                 with open(temp_dict_file, "wb") as f: f.write(dictate_audio['bytes'])
                 try:
@@ -243,18 +249,19 @@ else:
     st.write(f"### 📁 {_t('Đọc dữ liệu kiểm tra', native_code)}")
     uploaded_file = st.file_uploader(_t("Tải lên file (.xlsx hoặc .csv) - Cần có cột 'Cau_Hoi'", native_code), type=['xlsx', 'csv'])
     if uploaded_file:
-        try:
-            df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
-            if 'Cau_Hoi' in df.columns:
-                question_list = df['Cau_Hoi'].dropna().astype(str).tolist()
-                raw_input_text = st.selectbox(_t("Chọn câu hỏi để thực hành:", native_code), question_list)
-                if lang_choice == "Tiếng Trung" and raw_input_text:
-                    target_text = HanziConv.toTraditional(raw_input_text) if char_type == "Phồn thể" else HanziConv.toSimplified(raw_input_text)
+        with st.spinner(_t("Đang đọc dữ liệu...", native_code)):
+            try:
+                df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
+                if 'Cau_Hoi' in df.columns:
+                    question_list = df['Cau_Hoi'].dropna().astype(str).tolist()
+                    raw_input_text = st.selectbox(_t("Chọn câu hỏi để thực hành:", native_code), question_list)
+                    if lang_choice == "Tiếng Trung" and raw_input_text:
+                        target_text = HanziConv.toTraditional(raw_input_text) if char_type == "Phồn thể" else HanziConv.toSimplified(raw_input_text)
+                    else:
+                        target_text = raw_input_text
                 else:
-                    target_text = raw_input_text
-            else:
-                st.error(_t("Lỗi: Không tìm thấy cột 'Cau_Hoi'.", native_code))
-        except Exception as e: st.error(f"{_t('Lỗi đọc file:', native_code)} {e}")
+                    st.error(_t("Lỗi: Không tìm thấy cột 'Cau_Hoi'.", native_code))
+            except Exception as e: st.error(f"{_t('Lỗi đọc file:', native_code)} {e}")
 
 # --- TIẾN HÀNH KIỂM TRA ---
 if target_text != st.session_state.target_text_memory:
@@ -269,15 +276,16 @@ if target_text:
     with col_play_normal:
         st.caption(f"🚀 {_t('Tốc độ bình thường', native_code)}")
         try:
-            normal_audio = create_ai_voice(target_text, voice_code, rate="+0%")
+            with st.spinner(_t("Đang tạo...", native_code)):
+                normal_audio = create_ai_voice(target_text, voice_code, rate="+0%")
             st.audio(normal_audio, format='audio/mp3')
-        except Exception:
-            st.error(f"⚠️ {_t('Giọng AI không hỗ trợ ngôn ngữ này.', native_code)}")
+        except Exception: st.error(f"⚠️ {_t('Lỗi tạo giọng.', native_code)}")
             
     with col_play_slow:
         st.caption(f"🐢 {_t('Tốc độ chậm', native_code)}")
         try:
-            slow_audio = create_ai_voice(target_text, voice_code, rate="-40%")
+            with st.spinner(_t("Đang tạo...", native_code)):
+                slow_audio = create_ai_voice(target_text, voice_code, rate="-40%")
             st.audio(slow_audio, format='audio/mp3')
         except Exception: pass
 
@@ -296,7 +304,6 @@ if target_text:
                     user_text = result['text']
                     html_res, score, errors = analyze_pronunciation(target_text, user_text, lang_choice, native_code)
                     
-                    # Dịch câu mục tiêu sang ngôn ngữ mẹ đẻ (Native Language) thay vì luôn luôn là Tiếng Việt
                     translated_text = GoogleTranslator(source='auto', target=native_code).translate(target_text)
 
                     st.session_state.analysis_result = {
@@ -344,6 +351,6 @@ if st.session_state.analysis_result:
             st.write(f"💡 **{_t('Gợi ý sửa lỗi:', native_code)}**")
             for err in res['errors']:
                 if err in feedbacks: 
-                    # Dịch cả file feedback sang ngôn ngữ mẹ đẻ
                     translated_feedback = _t(feedbacks[err].get('message', ''), native_code)
                     st.warning(translated_feedback)
+                    
