@@ -14,22 +14,19 @@ import base64
 import edge_tts
 import asyncio
 
-st.set_page_config(page_title="Hệ Thống Kiểm Tra Phát Âm", layout="wide")
+st.set_page_config(page_title="Hệ Thống Kiểm Tra Phát Âm Toàn Cầu", layout="wide")
 
-# --- 0. QUẢN LÝ THƯ MỤC & DỌN RÁC (GARBAGE COLLECTION) ---
+# --- 0. QUẢN LÝ THƯ MỤC & DỌN RÁC ---
 TTS_DIR = "tts_cache"
 os.makedirs(TTS_DIR, exist_ok=True)
-os.makedirs("sounds", exist_ok=True) # Đảm bảo thư mục sounds luôn tồn tại
+os.makedirs("sounds", exist_ok=True)
 
-# Chỉ dọn rác 1 lần duy nhất mỗi khi mở app (phiên làm việc mới)
 if 'cleanup_done' not in st.session_state:
     for filename in os.listdir(TTS_DIR):
         filepath = os.path.join(TTS_DIR, filename)
         try:
-            if os.path.isfile(filepath):
-                os.remove(filepath)
-        except Exception:
-            pass
+            if os.path.isfile(filepath): os.remove(filepath)
+        except Exception: pass
     st.session_state.cleanup_done = True
 
 # --- 1. KHỞI TẠO BỘ NHỚ ---
@@ -38,6 +35,7 @@ if 'dictated_audio_id' not in st.session_state: st.session_state.dictated_audio_
 if 'target_text_memory' not in st.session_state: st.session_state.target_text_memory = ""
 if 'analysis_result' not in st.session_state: st.session_state.analysis_result = None
 if 'dictated_text' not in st.session_state: st.session_state.dictated_text = ""
+if 'prev_lang' not in st.session_state: st.session_state.prev_lang = "Tiếng Trung"
 
 # --- 2. HỆ THỐNG TẢI DỮ LIỆU ---
 @st.cache_resource
@@ -73,9 +71,7 @@ async def _generate_tts(text, voice, rate, filepath):
 
 def create_ai_voice(text, voice, rate="+0%"):
     file_hash = hash(text + voice + rate)
-    # Lưu vào thư mục tts_cache thay vì thư mục gốc
     filepath = os.path.join(TTS_DIR, f"tts_{abs(file_hash)}.mp3")
-    
     if not os.path.exists(filepath):
         try: loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -95,7 +91,8 @@ def get_chinese_details(text):
             if p not in string.punctuation and p.strip(): parsed.append((p, "5"))
     return parsed
 
-def clean_english_text(text):
+def clean_general_text(text):
+    # Loại bỏ dấu câu và đưa về in thường cho Tiếng Anh, Hàn, Việt
     text = text.translate(str.maketrans('', '', string.punctuation)).lower()
     return text.split()
 
@@ -123,7 +120,8 @@ def analyze_pronunciation(target, user, lang):
                 errors_found.add("wrong_pinyin")
             html_output.append(f"<div style='display:inline-block; text-align:center; margin:10px;'><div style='font-size:30px; color:{color}; font-weight:bold;'>{char}</div><div style='font-size:14px; color:gray;'>{t_pinyin}{t_tone}</div><div style='font-size:12px; background-color:{color}; color:white; border-radius:5px; padding:2px 5px;'>{label}</div></div>")
     else:
-        target_words, user_words = clean_english_text(target), clean_english_text(user)
+        # Dùng chung thuật toán so sánh từ cho Anh, Hàn, Việt
+        target_words, user_words = clean_general_text(target), clean_general_text(user)
         total_count = len(target_words)
         for i in range(total_count):
             target_w = target_words[i]
@@ -137,36 +135,58 @@ def analyze_pronunciation(target, user, lang):
                 correct_count += 1
             else:
                 color, label = "#dc3545", f"Nghe ra: {user_w}"
-                errors_found.add("english_wrong")
+                errors_found.add("word_wrong")
             html_output.append(f"<div style='display:inline-block; text-align:center; margin:10px;'><div style='font-size:24px; color:{color}; font-weight:bold;'>{target_w}</div><div style='font-size:12px; background-color:{color}; color:white; border-radius:5px; padding:2px 5px;'>{label}</div></div>")
 
     score = int((correct_count / total_count) * 100) if total_count > 0 else 0
     return "".join(html_output), score, errors_found
 
 # --- 5. GIAO DIỆN & LOGIC ĐIỀU HƯỚNG ---
-st.title("🎙️ Hệ Thống Kiểm Tra Phát Âm PRO")
+st.title("🎙️ Hệ Thống Kiểm Tra Phát Âm Toàn Cầu")
 
 with st.sidebar:
-    st.header("⚙️ Thiết lập hệ thống")
-    app_mode = st.selectbox("Chế độ hoạt động:", ["Luyện tập tự do", "Làm bài kiểm tra (Excel)"])
-    lang_choice = st.radio("Ngôn ngữ:", ("Tiếng Trung", "Tiếng Anh"))
+    st.header("🌍 Ngôn ngữ mẹ đẻ (Native)")
+    native_lang_choice = st.selectbox("Dịch nghĩa sang:", ["Tiếng Việt", "English", "한국어", "中文 (Giản thể)"])
+    native_map = {"Tiếng Việt": "vi", "English": "en", "한국어": "ko", "中文 (Giản thể)": "zh-CN"}
+    target_translate_code = native_map[native_lang_choice]
+
+    st.header("⚙️ Thiết lập bài học")
+    app_mode = st.selectbox("Chế độ:", ["Luyện tập tự do", "Làm bài kiểm tra (Excel)"])
+    lang_choice = st.selectbox("Ngôn ngữ muốn học:", ["Tiếng Trung", "Tiếng Anh", "Tiếng Hàn", "Tiếng Việt"])
     
+    if lang_choice != st.session_state.prev_lang:
+        st.session_state.dictated_text = ""
+        st.session_state.analysis_result = None
+        st.session_state.prev_lang = lang_choice
+
     char_type = "Giản thể"
     if lang_choice == "Tiếng Trung":
         char_type = st.radio("Loại chữ:", ("Giản thể", "Phồn thể"))
-        voice_choice = st.selectbox("Giọng AI bản xứ:", ["👩 Nữ (Xiaoxiao - Truyền cảm)", "👦 Nam (Yunxi - Trầm ấm)"])
+        voice_choice = st.selectbox("Giọng AI:", ["👩 Nữ (Xiaoxiao)", "👦 Nam (Yunxi)"])
         voice_code = "zh-CN-XiaoxiaoNeural" if "Nữ" in voice_choice else "zh-CN-YunxiNeural"
         whisper_lang = "zh"
-    else:
-        voice_choice = st.selectbox("Giọng AI bản xứ:", ["👩 Nữ (Aria)", "👦 Nam (Guy)"])
+        default_val = "你好"
+    elif lang_choice == "Tiếng Anh":
+        voice_choice = st.selectbox("Giọng AI:", ["👩 Nữ (Aria)", "👦 Nam (Guy)"])
         voice_code = "en-US-AriaNeural" if "Nữ" in voice_choice else "en-US-GuyNeural"
         whisper_lang = "en"
+        default_val = "I should study every day"
+    elif lang_choice == "Tiếng Hàn":
+        voice_choice = st.selectbox("Giọng AI:", ["👩 Nữ (SunHi)", "👦 Nam (InJoon)"])
+        voice_code = "ko-KR-SunHiNeural" if "Nữ" in voice_choice else "ko-KR-InJoonNeural"
+        whisper_lang = "ko"
+        default_val = "안녕하세요"
+    elif lang_choice == "Tiếng Việt":
+        voice_choice = st.selectbox("Giọng AI:", ["👩 Nữ (Hoài My)", "👦 Nam (Nam Minh)"])
+        voice_code = "vi-VN-HoaiMyNeural" if "Nữ" in voice_choice else "vi-VN-NamMinhNeural"
+        whisper_lang = "vi"
+        default_val = "Xin chào, bạn khỏe không?"
 
 target_text = ""
 
 # --- CHẾ ĐỘ 1: LUYỆN TẬP TỰ DO ---
 if app_mode == "Luyện tập tự do":
-    st.write("### 📝 Nhập dữ liệu")
+    st.write(f"### 📝 Nhập dữ liệu ({lang_choice})")
     col_text, col_mic = st.columns([4, 1])
     with col_mic:
         st.write("Hoặc đọc để nhập:")
@@ -184,8 +204,8 @@ if app_mode == "Luyện tập tự do":
                 st.rerun()
 
     with col_text:
-        default_val = st.session_state.dictated_text if st.session_state.dictated_text else ("你好" if lang_choice == "Tiếng Trung" else "I should study every day")
-        raw_input_text = st.text_input("Nhập câu cần luyện:", value=default_val)
+        val = st.session_state.dictated_text if st.session_state.dictated_text else default_val
+        raw_input_text = st.text_input("Nhập câu cần luyện:", value=val, key=f"input_{lang_choice}")
 
     if lang_choice == "Tiếng Trung" and raw_input_text:
         target_text = HanziConv.toTraditional(raw_input_text) if char_type == "Phồn thể" else HanziConv.toSimplified(raw_input_text)
@@ -219,14 +239,21 @@ if target_text:
     st.write("---")
     st.write("🔊 **Nghe AI đọc mẫu:**")
     col_play_normal, col_play_slow, col_empty = st.columns([1, 1, 2])
+    
     with col_play_normal:
         st.caption("🚀 Tốc độ bình thường")
-        normal_audio = create_ai_voice(target_text, voice_code, rate="+0%")
-        st.audio(normal_audio, format='audio/mp3')
+        try:
+            normal_audio = create_ai_voice(target_text, voice_code, rate="+0%")
+            st.audio(normal_audio, format='audio/mp3')
+        except Exception:
+            st.error("⚠️ Lỗi tạo giọng đọc AI.")
+            
     with col_play_slow:
-        st.caption("🐢 Tốc độ chậm (Từng từ)")
-        slow_audio = create_ai_voice(target_text, voice_code, rate="-40%")
-        st.audio(slow_audio, format='audio/mp3')
+        st.caption("🐢 Tốc độ chậm")
+        try:
+            slow_audio = create_ai_voice(target_text, voice_code, rate="-40%")
+            st.audio(slow_audio, format='audio/mp3')
+        except Exception: pass
 
     st.write("---")
     st.write("🎙️ **Đến lượt bạn:**")
@@ -242,7 +269,9 @@ if target_text:
                     result = model.transcribe(unique_filename, language=whisper_lang, temperature=0.0)
                     user_text = result['text']
                     html_res, score, errors = analyze_pronunciation(target_text, user_text, lang_choice)
-                    translated_text = GoogleTranslator(source='auto', target='vi').translate(target_text)
+                    
+                    # Dịch linh hoạt theo ngôn ngữ mẹ đẻ đã chọn
+                    translated_text = GoogleTranslator(source='auto', target=target_translate_code).translate(target_text)
 
                     st.session_state.analysis_result = {
                         'html': html_res, 'score': score, 'errors': errors,
@@ -289,3 +318,4 @@ if st.session_state.analysis_result:
             st.write("💡 **Gợi ý sửa lỗi:**")
             for err in res['errors']:
                 if err in feedbacks: st.warning(feedbacks[err].get('message', ''))
+                
